@@ -13,3 +13,12 @@
 9. So, now, we have to get the results of these actions, which we have to also do through an API, which will be the ExtractAPI.
 10. The ExtractAPI will be responsible for retrieving and parsing the results of the structured data from the web pages that the browser has loaded.
 11. So, right now, the thing is, we just go to the web page, extract the text, or just take a screenshot. I'm not building anything more complex (no time, maybe later).
+
+4 May '26
+
+- Ok, so, we want to have a translated_prompt function, which takes the natural language prompt, and translates it into a structured command that the agent can understand.
+- This is most likely an LLM API call, where we send the natural language prompt, and get back a structured command.
+- To ground the LLMs response, we make sure that the LLM can only choose from the allowed actions in our Action Vocab.
+- LLM shouldn't invent new actions, nor generate/execute any code.
+- We have to make sure to validate the LLM's response, against the schema of the structured command, to ensure that it is in the correct format and only contains allowed actions.
+- Reject/Repair invalid plan, and execute only validated a- ons.

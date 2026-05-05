@@ -1,6 +1,6 @@
-# Ariadne / Browser Agent Control Plane Roadmap
+# Janus/ Browser Agent Control Plane Roadmap
 
-> Working title: **Ariadne** — a browser automation agent with execution tracing, replay, reliability scoring, and structured extraction.
+> Working title: **Janus** — a browser automation agent with execution tracing, replay, reliability scoring, and structured extraction.
 >
 > Core thesis: do not just build an agent that controls a browser. Build the **control plane** that makes browser agents observable, debuggable, measurable, and trustworthy.
 
@@ -46,11 +46,11 @@ A polished repo + Loom demo showing:
 
 ### Suggested tagline
 
-> Ariadne: the thread through browser automation.
+> Janus: the thread through browser automation.
 
 ### Core narrative
 
-Browsers are messy. Agents are non-deterministic. Ariadne makes browser automation inspectable: every decision, action, screenshot, retry, and extracted output is visible and replayable.
+Browsers are messy. Agents are non-deterministic. Janus makes browser automation inspectable: every decision, action, screenshot, retry, and extracted output is visible and replayable.
 
 ---
 
@@ -102,19 +102,26 @@ User / UI / API
 Instruction Parser
       |
       v
-Planner
++------------------+
+|  Plan Phase      |  <- One LLM call: high-level action plan
+|  (LLMProvider)   |     e.g., ["goto google.com", "search for X", ...]
++------------------+
       |
       v
-Action Plan JSON
++------------------+
+|  Validate Plan   |  <- Pydantic validates against Action Vocab
+|  (Deterministic) |     Reject/Repair if invalid
++------------------+
       |
       v
-Executor
-      |
-      +--> Browser Controller / Playwright
-      |
-      +--> Observer / Page State / Screenshot / DOM snapshot
-      |
-      +--> Recovery Engine / Retry / Fallback
++------------------+
+|  Execute Phase   |  <- Loop: for each planned step...
+|  (Observe→Decide)|     1. Observe page state (URL, title, smart DOM, screenshot)
++------------------+     2. LLM: "Given goal + plan + current state, what's next?"
+      |                  3. Validate single action
+      |                  4. Execute via Playwright
+      |                  5. Capture result + screenshot
+      +------------------> Repeat until done or max_steps
       |
       v
 Extractor
@@ -123,34 +130,39 @@ Extractor
 Structured Output
       |
       v
-Trace Store + Dashboard
+Trace Store (Postgres) + Dashboard (Next.js)
 ```
 
 ### Core loop
 
 ```text
-plan -> act -> observe -> evaluate -> recover or continue -> extract -> report
+plan -> validate -> act -> observe -> decide -> recover or continue -> extract -> report
 ```
 
-This loop is the conceptual heart of the project.
+This loop is the conceptual heart of the project. The **hybrid planner** (Approach C) gives us the structure of an up-front plan with the adaptability of step-by-step execution.
 
 ---
 
-## 4. Recommended Tech Stack
+## 4. Confirmed Tech Stack
 
 ### Backend
 
-Recommended: **TypeScript + Node.js + Fastify/Express**
+**Python + FastAPI + Playwright**
 
 Why:
 
-- Playwright has first-class TypeScript support.
-- Good JSON schema validation with Zod.
-- Easy deployment and UI integration.
+- FastAPI gives us automatic API docs, async request handling, and excellent Pydantic integration.
+- Python's data/ML ecosystem makes evals, extraction, and scripting easier.
+- Playwright's Python API is mature and well-documented.
+- We already have a working FastAPI scaffold.
 
-Alternative: Python + FastAPI + Playwright
+### Frontend
 
-Use Python if you are much faster in Python and want easier data/eval scripting.
+**Next.js (React)**
+
+- Full-featured dashboard with run traces, step timelines, and screenshot viewers.
+- Easy to deploy and iterate.
+- Can start minimal and expand.
 
 ### Browser automation
 
@@ -160,33 +172,28 @@ Use Python if you are much faster in Python and want easier data/eval scripting.
 
 ### LLM integration
 
-- Any model with structured JSON support.
-- Use schema-constrained output where possible.
+- **Primary: Gemini** (cost-effective, good structured JSON output).
+- **Swappable**: abstracted behind `LLMProvider` interface so we can hot-swap to OpenAI, Anthropic, etc. without changing planner logic.
+- Schema-constrained output via Pydantic.
 - Keep the executor deterministic.
 
 ### Database
 
-Start with SQLite or Postgres.
+**PostgreSQL**
 
-Recommended simple path:
-
-- SQLite for speed early.
-- Postgres if deploying with a proper backend.
-
-### UI
-
-- Next.js or simple React/Vite.
-- Minimal dashboard is enough.
+- Better fit for structured relational data (runs, steps, artifacts) than SQLite at this scale.
+- Supports JSONB for flexible step payloads.
+- Easy migration path if we deploy later.
 
 ### Validation
 
-- Zod for TypeScript.
-- Pydantic if Python.
+- **Pydantic** for action schemas, request/response models, and extraction schemas.
 
 ### Observability
 
 - Structured JSON logs.
-- Trace table in DB.
+- Trace tables in Postgres.
+- Screenshot files on disk.
 - Optional OpenTelemetry export later.
 
 ---
@@ -237,11 +244,23 @@ Recommended choice:
 
 ---
 
-### 5.2 Planner
+### 5.2 Planner (Hybrid Approach C)
 
 Responsibility:
 
-- Convert a normalized task into an action plan.
+- Generate an up-front action plan, then execute step-by-step with page-state awareness.
+
+**Two LLM prompts:**
+
+**Prompt 1 — Planner:**
+- Input: User's natural language instruction
+- Output: JSON array of action objects conforming to Action Vocab
+- System prompt enforces: "You may ONLY use these action types: goto, click, type, press, scroll, screenshot, extract. Do not invent new actions."
+
+**Prompt 2 — Step Executor:**
+- Input: `goal` + `current_plan_step` + `page_state` + `history`
+- Output: Single action object
+- System prompt enforces: "Execute the current planned step. If the page state is unexpected, adapt using only allowed actions."
 
 Example action plan:
 
@@ -259,17 +278,16 @@ Example action plan:
 What to learn:
 
 - Tool/action schemas.
-- Planning boundaries.
+- Prompt engineering for structured outputs.
 - How to avoid letting the LLM directly execute arbitrary code.
 
 Tradeoff:
 
-- Big up-front plan vs step-by-step replanning.
+- Big up-front plan vs step-by-step replanning vs hybrid.
 
 Recommended choice:
 
-- Begin with up-front plans for simplicity.
-- Add step-by-step replanning only for recovery.
+- **Hybrid (Approach C)**: Up-front plan provides structure and prevents wandering. Step-by-step execution with page-state observation handles dynamic content, popups, and errors. Best of both worlds for demo reliability and real-world robustness.
 
 ---
 
@@ -360,16 +378,39 @@ Recommended choice:
 
 Responsibility:
 
-- Capture state after each action.
+- Capture state after each action to feed the step executor and store in traces.
+
+**Smart DOM extraction (default: `standard` mode):**
+
+```python
+{
+    "url": "...",
+    "title": "...",
+    "interactive_elements": [
+        {"id": "el-1", "tag": "button", "text": "Search", "aria-label": "Search"},
+        {"id": "el-2", "tag": "input", "placeholder": "Enter query...", "type": "text"},
+        {"id": "el-3", "tag": "a", "text": "Advanced search", "href": "/advanced"},
+    ],
+    "headings": ["Main Title", "Section 1"],
+    "visible_text_preview": "...",
+}
+```
 
 State includes:
 
 - Current URL.
 - Page title.
 - Screenshot.
-- Optional simplified DOM.
-- Visible text summary.
+- **Smart DOM**: interactive elements + headings + visible text (not raw HTML dump).
 - Network/page errors.
+
+**Extraction levels (configurable):**
+
+| Level | Content | Use case |
+|---|---|---|
+| `minimal` | URL + title + visible text | Fast, cheap, simple pages |
+| `standard` | + interactive elements + headings | **Default**. Good balance |
+| `full` | + structured DOM tree | Complex sites, Level 2/3 |
 
 What to learn:
 
@@ -378,13 +419,15 @@ What to learn:
 
 Tradeoff:
 
-- Full DOM snapshots are rich but noisy and large.
+- Full DOM snapshots are rich but noisy and large (50k+ tokens).
 - Text summaries are compact but lossy.
+- Smart DOM extraction is the "cool" middle ground: rich enough for the LLM to reason about structure, compact enough to fit in context.
 
 Recommended choice:
 
-- Store screenshot + URL + title + selected visible text.
-- Add DOM snapshot only when debugging extraction.
+- **Smart DOM extraction (`standard` mode)** as default.
+- Store screenshot + URL + title + smart DOM + visible text in trace.
+- Bounding box coordinates deferred to Level 2 native control implementation.
 
 ---
 
@@ -394,6 +437,7 @@ Responsibility:
 
 - Classify errors.
 - Retry or replan.
+- Validate and repair invalid LLM outputs.
 
 Error classes:
 
@@ -405,22 +449,36 @@ blocked_or_captcha
 login_required
 unexpected_modal
 extraction_schema_failed
+action_validation_failed
 unknown
 ```
 
-Recovery examples:
+Recovery strategies:
 
-- Timeout: wait and retry once.
-- Selector not found: ask LLM for alternative target using page state.
-- Modal detected: close modal if safe.
-- CAPTCHA: stop, mark blocked, ask human.
-- Extraction schema failed: retry extraction with stricter schema.
+| Error | Detection | Recovery |
+|---|---|---|
+| `selector_not_found` | Playwright timeout | **Smart retry**: LLM gets page state, suggests alternative target. One auto-retry, then fail clearly. |
+| `timeout` | Page load > threshold | **Retry once** with longer timeout. Still fail? Log and stop. |
+| `navigation_failed` | 404, SSL error | **Fail fast**. Don't retry broken URLs. |
+| `unexpected_modal` | DOM shows modal/popup | **Auto-dismiss** safe modals (cookie banners). **Stop** for CAPTCHAs. |
+| `action_validation_failed` | LLM output doesn't match Action Vocab | **Repair prompt**: "Invalid action X. Allowed actions: [...]. Try again." Max 2 repairs. |
+| `max_steps_exceeded` | Step count > limit | **Graceful halt**. Return partial results + "reached step limit". |
+
+**Guardrails & Validation (Deterministic Layer):**
+
+After every LLM response:
+1. **Schema validation** (Pydantic): `ActionModel.parse_raw(llm_response)`
+2. **Vocab validation**: `action.type in ALLOWED_ACTIONS`
+3. **Parameter validation**: e.g., `is_valid_url(action.url)` for goto
+
+If validation fails → log error → send repair prompt → retry up to N times. If still invalid → halt with clear error.
 
 What to learn:
 
 - Idempotency.
 - Retry budgets.
 - When not to retry.
+- How to keep LLMs constrained without being brittle.
 
 Tradeoff:
 
@@ -431,7 +489,8 @@ Recommended choice:
 
 - One automatic retry per step.
 - One LLM-assisted recovery per run.
-- Then fail clearly.
+- Max 2 repair attempts for validation failures.
+- Then fail clearly with structured error.
 
 ---
 
@@ -484,15 +543,15 @@ Recommended choice:
 - Hybrid extraction:
   - deterministic DOM collection first,
   - LLM converts candidate text into schema,
-  - Zod validates result.
+  - Pydantic validates result.
 
 ---
 
-### 5.8 Trace Store
+### 5.8 Trace Store (Postgres)
 
 Responsibility:
 
-- Persist runs and steps.
+- Persist runs and steps in PostgreSQL.
 
 Suggested DB tables:
 
@@ -589,6 +648,45 @@ Recommended choice:
 
 ---
 
+### 5.10 LLM Provider Abstraction
+
+Responsibility:
+
+- Abstract the LLM behind a provider interface so we can swap Gemini for OpenAI, Anthropic, etc. without changing planner logic.
+
+```python
+class LLMProvider(ABC):
+    @abstractmethod
+    async def generate_plan(self, instruction: str, system_prompt: str) -> list[dict]:
+        """Generate high-level action plan from instruction."""
+        pass
+
+    @abstractmethod
+    async def decide_next_action(
+        self, goal: str, current_plan_step: dict,
+        page_state: dict, history: list[dict], system_prompt: str
+    ) -> dict:
+        """Given page state and plan context, decide the next single action."""
+        pass
+
+class GeminiProvider(LLMProvider):
+    # Gemini-specific API calls
+    ...
+
+# Future: class OpenAIProvider(LLMProvider), class AnthropicProvider(LLMProvider)
+```
+
+**Config** (`.env`):
+```bash
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-1.5-flash
+```
+
+The planner never knows which provider it's using — it just calls `llm.generate_plan()` and `llm.decide_next_action()`.
+
+---
+
 ## 6. Observability Concepts to Learn
 
 ### Logs
@@ -616,7 +714,7 @@ Traces answer:
 
 > How did one request flow through the system?
 
-For Ariadne:
+For Janus:
 
 ```text
 run trace = user instruction + plan + every browser action + observations + output
@@ -881,13 +979,15 @@ Decision:
 |---|---|---|---|
 | Fully deterministic | Reliable | Less flexible | Use inside executor |
 | Fully LLM-driven | Flexible | Unreliable and hard to debug | Avoid |
-| Hybrid | Flexible + controlled | Requires clean boundaries | Best choice |
+| Up-front plan only | Simple, one LLM call | Brittle on dynamic pages | Avoid for real sites |
+| **Hybrid (Plan + Step-by-Step)** | **Structure + adaptability** | **More LLM calls** | **Best choice** |
 
 Decision:
 
-- LLM plans.
-- Code executes.
+- **Hybrid Approach C**: LLM generates up-front plan for structure. LLM decides each step based on observed page state for adaptability.
+- Deterministic code validates every LLM output (schema + vocab + params).
 - LLM helps recover only when deterministic methods fail.
+- Guardrails: max_steps, validation repair loop, action vocab enforcement.
 
 ### 11.3 Generic agent vs domain-specific workflows
 
@@ -1013,7 +1113,7 @@ Turn browsing into useful structured data.
 ### Learn
 
 - DOM extraction.
-- Schema validation with Zod/Pydantic.
+- Schema validation with Pydantic.
 - LLM-assisted extraction patterns.
 
 ### Build
@@ -1317,7 +1417,7 @@ Outcome:
 
 README sections:
 
-1. What is Ariadne?
+1. What is Janus?
 2. Why browser agents need observability.
 3. Architecture diagram.
 4. Features.
@@ -1384,68 +1484,47 @@ Suggested positioning:
 
 ## 16. Repository Structure
 
-Recommended TypeScript layout:
+Confirmed layout:
 
 ```text
-ariadne/
-  apps/
-    web/
-      src/
-        app/
-        components/
-        pages/
-    api/
-      src/
-        server.ts
-        routes/
-          interact.ts
-          extract.ts
-          runs.ts
-  packages/
-    agent/
-      src/
-        planner.ts
-        action-schema.ts
-        executor.ts
-        recovery.ts
-        observer.ts
-        extractor.ts
-    db/
-      src/
-        schema.ts
-        client.ts
-    shared/
-      src/
-        types.ts
-        zod-schemas.ts
+janus/
+  app/                          # FastAPI backend
+    main.py                     # FastAPI server, routes
+    model.py                    # Pydantic action schemas
+    planner.py                  # Hybrid planner (Plan + Step Executor)
+    executor.py                 # Action execution loop
+    browser.py                  # Playwright controller
+    observer.py                 # Page state extraction (smart DOM)
+    recovery.py                 # Error classification & retry logic
+    extractor.py                # Structured data extraction
+    llm.py                      # LLMProvider abstraction + Gemini impl
+    db.py                       # Postgres client/models
+  web/                          # Next.js frontend
+    src/
+      app/
+        page.tsx                # New run page
+        runs/
+          [id]/
+            page.tsx            # Run detail page
+      components/
+        Timeline.tsx
+        StepCard.tsx
+        ScreenshotViewer.tsx
   artifacts/
-    screenshots/
-    traces/
+    screenshots/                # Step-level screenshots per run
+    traces/                     # Playwright trace zips
   evals/
     tasks.json
-    run-evals.ts
+    run_evals.py
+  docs/
+    roadmap.md
+    understanding.md
   README.md
   .env.example
+  requirements.txt
 ```
 
-Simpler single-app layout if moving fast:
-
-```text
-ariadne/
-  src/
-    server/
-      routes/
-      agent/
-      db/
-    web/
-      components/
-      pages/
-  artifacts/
-  evals/
-  README.md
-```
-
-Choose simplicity if you feel setup friction.
+Choose simplicity where possible. The backend is intentionally flat (all modules in `app/`) to reduce import complexity and context-switching.
 
 ---
 
@@ -1658,7 +1737,7 @@ A normal browser agent is:
 Prompt -> Browser -> Maybe result
 ```
 
-Ariadne should be:
+Janus should be:
 
 ```text
 Prompt
@@ -1678,15 +1757,19 @@ That is the difference between a hack and an engineering system.
 
 ## 24. Immediate Next Actions
 
-1. Create repo.
-2. Choose stack.
-3. Implement Playwright hello-world.
-4. Define action schema.
-5. Create `/interact` endpoint.
-6. Execute one fixed plan.
-7. Add step logs.
-8. Add screenshots.
-9. Add extraction.
-10. Build trace UI.
+1. ~~Create repo.~~ Done.
+2. ~~Choose stack.~~ Confirmed: Python/FastAPI + Next.js + Postgres.
+3. Implement `LLMProvider` abstraction with Gemini.
+4. Implement hybrid planner:
+   - `generate_plan()` prompt + validation
+   - `decide_next_action()` prompt + validation
+5. Implement smart DOM observer (`standard` mode default).
+6. Wire planner + observer + executor into `/api/interact`.
+7. Add action validation layer (schema + vocab + params).
+8. Add validation repair loop (max 2 retries).
+9. Add step logging to Postgres trace store.
+10. Add screenshots per step.
+11. Add extraction endpoint.
+12. Build trace UI (Next.js).
 
-Start with the smallest possible loop. Then make it visible, reliable, and memorable.
+Start with the smallest possible loop: `/api/interact` -> plan -> validate -> execute one action -> observe -> return trace. Then make it visible, reliable, and memorable.

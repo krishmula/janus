@@ -69,3 +69,12 @@ Action = Union[
     ScrollAction, SelectAction, BackAction, HoverAction,
     UploadFileAction, ConfirmHumanCheckpoint, ScreenshotAction,
 ]
+
+
+class InteractRequest(BaseModel):
+    prompt: str = ""
+
+
+class ExtractRequest(BaseModel):
+    run_id: str = Field(..., description="Run identifier to extract results from")
+    schema_name: str = Field(default="default", description="Named extraction schema to apply")
