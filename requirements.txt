@@ -5,3 +5,7 @@ pydantic
 python-dotenv
 httpx
 google-genai
+
+# test
+pytest
+pytest-asyncio
