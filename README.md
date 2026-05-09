@@ -65,6 +65,14 @@ cp .env.example .env  # add your API keys
 uvicorn app.main:app --reload
 ```
 
+### Usage
+
+```bash
+curl -X POST http://localhost:8000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Go to google.com and search for browser automation tools"}'
+```
+
 ---
 
 ## Project structure

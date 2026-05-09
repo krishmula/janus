@@ -3,18 +3,14 @@ from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
-class ActionType(str, Enum): 
+class ActionType(str, Enum):
     GOTO = "goto"
     CLICK = "click"
     TYPE = "type"
     PRESS = "press"
     SCROLL = "scroll"
-    SELECT = "select"
-    BACK = "back"
-    HOVER = "hover"
-    UPLOAD_FILE = "upload_file"
-    CONFIRM_HUMAN_CHECKPOINT = "confirm_human_checkpoint"
     SCREENSHOT = "screenshot"
+    DONE = "done"
 
 
 class GotoAction(BaseModel):
@@ -39,35 +35,17 @@ class ScrollAction(BaseModel):
     direction: str = Field(..., description="Direction to scroll: up or down")
     amount: int = Field(default=300, description="Pixels to scroll")
 
-class SelectAction(BaseModel):
-    type: Literal[ActionType.SELECT]
-    target: str = Field(..., description="The target element selector")
-    value: str = Field(..., description="The value to select")
-
-class BackAction(BaseModel):
-    type: Literal[ActionType.BACK]
-
-class HoverAction(BaseModel):
-    type: Literal[ActionType.HOVER]
-    target: str = Field(..., description="The target element to hover")
-
-class UploadFileAction(BaseModel):
-    type: Literal[ActionType.UPLOAD_FILE]
-    target: str = Field(..., description="The file input selector")
-    path: str = Field(..., description="The local file path to upload")
-
-class ConfirmHumanCheckpoint(BaseModel):
-    type: Literal[ActionType.CONFIRM_HUMAN_CHECKPOINT]
-    reason: str = Field(..., description="Reason for human approval")
-
 class ScreenshotAction(BaseModel):
     type: Literal[ActionType.SCREENSHOT]
     name: str = Field(default="step", description="Screenshot file name")
 
+class DoneAction(BaseModel):
+    type: Literal[ActionType.DONE]
+    result: str = Field(..., description="Summary of what was accomplished")
+
 Action = Union[
     GotoAction, ClickAction, TypeAction, PressAction,
-    ScrollAction, SelectAction, BackAction, HoverAction,
-    UploadFileAction, ConfirmHumanCheckpoint, ScreenshotAction,
+    ScrollAction, ScreenshotAction, DoneAction,
 ]
 
 

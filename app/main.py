@@ -6,12 +6,14 @@ import logging
 import time
 import uuid
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.executor import run
+from app import executor
 from app.model import ExtractRequest, InteractRequest
-from app.planner import plan
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +53,22 @@ def create_app() -> FastAPI:
 
     @application.post("/api/interact")
     async def interact(body: InteractRequest) -> JSONResponse:
-        translated_prompt = await plan(body.prompt)
-        steps = await run(translated_prompt)
-        logger.debug("Interact completed with %d steps", len(steps))
-        return JSONResponse({"steps": steps})
+        goal = body.prompt
+        run_id = str(uuid.uuid4())
+        steps, final_result = await executor.run(goal)
+
+        logger.debug("Interact completed with %d step(s)", len(steps))
+
+        return JSONResponse(
+            {
+                "run_id": run_id,
+                "goal": goal,
+                "steps": steps,
+                "total_steps": len(steps),
+                "final_result": final_result,
+                "final_screenshot": final_result.get("screenshot_path") if final_result else None,
+            }
+        )
 
     @application.post("/api/extract")
     async def extract(body: ExtractRequest) -> JSONResponse:
