@@ -45,6 +45,9 @@ class TestInteractEndpoint:
                 "error": None,
                 "latency_ms": 10.0,
                 "screenshot_path": None,
+                "evaluation": "Navigated successfully",
+                "memory_snapshot": "Landed on example.com",
+                "next_goal": "Find the target element",
             }
         ]
         with patch("app.main.executor.run") as mock_run:

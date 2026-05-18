@@ -7,6 +7,7 @@ from pydantic import TypeAdapter
 from app.model import (
     Action,
     ActionType,
+    AgentOutput,
     ClickAction,
     DoneAction,
     ExtractRequest,
@@ -140,6 +141,53 @@ class TestActionUnion:
     def test_rejects_extract(self):
         with pytest.raises(pydantic.ValidationError):
             _action_adapter.validate_python({"type": "extract", "target": "data"})
+
+
+class TestAgentOutput:
+    def test_requires_all_fields(self):
+        o = AgentOutput(
+            evaluation="ok",
+            memory="m",
+            next_goal="ng",
+            action=GotoAction(type="goto", url="https://x.com"),
+        )
+        assert o.evaluation == "ok"
+
+    def test_evaluation_max_length_enforced(self):
+        with pytest.raises(pydantic.ValidationError):
+            AgentOutput(
+                evaluation="x" * 201,
+                memory="m",
+                next_goal="ng",
+                action=GotoAction(type="goto", url="https://x.com"),
+            )
+
+    def test_memory_max_length_enforced(self):
+        with pytest.raises(pydantic.ValidationError):
+            AgentOutput(
+                evaluation="ok",
+                memory="x" * 601,
+                next_goal="ng",
+                action=GotoAction(type="goto", url="https://x.com"),
+            )
+
+    def test_next_goal_max_length_enforced(self):
+        with pytest.raises(pydantic.ValidationError):
+            AgentOutput(
+                evaluation="ok",
+                memory="m",
+                next_goal="x" * 151,
+                action=GotoAction(type="goto", url="https://x.com"),
+            )
+
+    def test_action_must_be_valid(self):
+        with pytest.raises(pydantic.ValidationError):
+            AgentOutput(
+                evaluation="ok",
+                memory="m",
+                next_goal="ng",
+                action={"type": "invalid"},
+            )
 
 
 class TestInteractRequest:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -87,8 +87,6 @@ class TestBrowserLifecycle:
 
     @pytest.mark.asyncio
     async def test_browser_stopped_even_on_error(self, monkeypatch):
-        from unittest.mock import AsyncMock
-
         browser = MockBrowser()
         llm = MockLLM(actions=[{"type": "goto", "url": "https://example.com"}])
         monkeypatch.setattr(browser, "get_page_state", AsyncMock(side_effect=RuntimeError("boom")))
@@ -124,6 +122,9 @@ class TestStepRecording:
         assert "latency_ms" in step
         assert "error" in step
         assert "screenshot_path" in step
+        assert "evaluation" in step
+        assert "memory_snapshot" in step
+        assert "next_goal" in step
 
     @pytest.mark.asyncio
     async def test_steps_exclude_done_action(self):
@@ -194,26 +195,18 @@ class TestFinalResult:
         assert final_result is None
 
 
-class TestMarkovLoop:
+class TestAgentLoop:
     @pytest.mark.asyncio
-    async def test_last_action_passed_to_llm(self):
+    async def test_memory_starts_empty_at_first_call(self):
         browser = MockBrowser()
-        llm = MockLLM(actions=[
-            {"type": "goto", "url": "https://a.com"},
-            {"type": "done", "result": "done"},
-        ])
+        llm = MockLLM(actions=[{"type": "done", "result": "done"}])
         with (
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
             await run("test")
 
-        assert len(llm.calls) == 2
-        first_call_last_action = llm.calls[0][1]
-        second_call_last_action = llm.calls[1][1]
-        assert first_call_last_action is None
-        assert second_call_last_action is not None
-        assert second_call_last_action["action_type"] == "goto"
+        assert llm.calls[0][1] == ""
 
     @pytest.mark.asyncio
     async def test_page_state_passed_to_llm(self):
@@ -230,7 +223,7 @@ class TestMarkovLoop:
             await run("test")
 
         assert len(llm.calls) >= 2
-        page_state_after_goto = llm.calls[1][2]
+        page_state_after_goto = llm.calls[1][3]
         assert page_state_after_goto["url"] == "https://example.com"
         assert page_state_after_goto["title"] == "Example"
 
@@ -248,3 +241,120 @@ class TestMarkovLoop:
         last_action = browser.executed_actions[-1]
         assert last_action["type"] == "screenshot"
         assert last_action["name"] == "final"
+
+
+class TestMemoryManagement:
+    @pytest.mark.asyncio
+    async def test_memory_from_llm_reaches_next_call(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {
+                "evaluation": "navigated",
+                "memory": "landed on example.com",
+                "next_goal": "find the link",
+                "action": {"type": "goto", "url": "https://example.com"},
+            },
+            {
+                "evaluation": "done",
+                "memory": "task complete",
+                "next_goal": "finish",
+                "action": {"type": "done", "result": "finished"},
+            },
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            await run("test")
+
+        assert llm.calls[1][1] == "landed on example.com"
+
+    @pytest.mark.asyncio
+    async def test_recent_steps_passed_to_llm(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "done", "result": "done"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            await run("test")
+
+        second_call_recent_steps = llm.calls[1][2]
+        assert len(second_call_recent_steps) == 1
+
+    @pytest.mark.asyncio
+    async def test_recent_steps_capped_at_3(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "done", "result": "finished"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            await run("test", max_steps=10)
+
+        assert len(llm.calls) == 6
+        sixth_call_recent_steps = llm.calls[5][2]
+        assert len(sixth_call_recent_steps) == 3
+
+    @pytest.mark.asyncio
+    async def test_recent_step_entry_fields(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "done", "result": "done"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            await run("test")
+
+        entry = llm.calls[1][2][0]
+        assert "step" in entry
+        assert "action_type" in entry
+        assert "action_target" in entry
+        assert "status" in entry
+        assert "error" in entry
+        assert "next_goal" in entry
+
+    @pytest.mark.asyncio
+    async def test_recent_steps_action_target_from_url(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "done", "result": "done"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            await run("test")
+
+        entry = llm.calls[1][2][0]
+        assert entry["action_target"] == "https://example.com"
+
+    @pytest.mark.asyncio
+    async def test_recent_steps_action_target_from_target(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "click", "target": ".btn"},
+            {"type": "done", "result": "done"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            await run("test")
+
+        entry = llm.calls[1][2][0]
+        assert entry["action_target"] == ".btn"

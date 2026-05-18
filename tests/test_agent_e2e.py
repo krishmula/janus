@@ -134,3 +134,81 @@ class TestMultiStepSequence:
         assert len(steps) == 4
         assert [s["action_type"] for s in steps] == ["goto", "type", "press", "click"]
         assert final_result["summary"] == "found results"
+
+
+class TestMemoryEvolution:
+    @pytest.mark.asyncio
+    async def test_memory_evolves_across_steps(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {
+                "evaluation": "navigated to HN",
+                "memory": "visited HN homepage",
+                "next_goal": "click the top post",
+                "action": {"type": "goto", "url": "https://news.ycombinator.com/"},
+            },
+            {
+                "evaluation": "clicked successfully",
+                "memory": "visited HN, clicked top post",
+                "next_goal": "read the article",
+                "action": {"type": "done", "result": "navigated to top post"},
+            },
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            steps, _ = await run("get the top post on hackernews")
+
+        assert llm.calls[1][1] == "visited HN homepage"
+        assert steps[0]["memory_snapshot"] == "visited HN homepage"
+
+    @pytest.mark.asyncio
+    async def test_evaluation_stored_in_step_record(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {
+                "evaluation": "page loaded successfully",
+                "memory": "on example.com",
+                "next_goal": "find next target",
+                "action": {"type": "goto", "url": "https://example.com"},
+            },
+            {
+                "evaluation": "all done",
+                "memory": "task complete",
+                "next_goal": "finish",
+                "action": {"type": "done", "result": "finished"},
+            },
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            steps, _ = await run("test")
+
+        assert steps[0]["evaluation"] == "page loaded successfully"
+
+    @pytest.mark.asyncio
+    async def test_next_goal_stored_in_step_record(self):
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {
+                "evaluation": "navigated",
+                "memory": "on example.com",
+                "next_goal": "click the main link",
+                "action": {"type": "goto", "url": "https://example.com"},
+            },
+            {
+                "evaluation": "done",
+                "memory": "task complete",
+                "next_goal": "finish",
+                "action": {"type": "done", "result": "finished"},
+            },
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            steps, _ = await run("test")
+
+        assert steps[0]["next_goal"] == "click the main link"

@@ -13,7 +13,7 @@ from google.genai import types
 
 from app.llm.base import LLMProvider
 from app.llm.prompts import SYSTEM_PROMPT
-from app.llm.schemas import _ACTION_RESPONSE_SCHEMA
+from app.llm.schemas import _AGENT_OUTPUT_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ class GeminiProvider(LLMProvider):
         user_prompt: str,
         response_schema: dict[str, Any] | None = None,
         temperature: float = 0.2,
+        screenshot: bytes | None = None,
     ) -> dict[str, Any]:
         """Call Gemini and return parsed JSON.
 
@@ -58,10 +59,18 @@ class GeminiProvider(LLMProvider):
 
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
+        if screenshot:
+            contents = [
+                types.Part.from_text(text=full_prompt),
+                types.Part.from_bytes(data=screenshot, mime_type="image/png"),
+            ]
+        else:
+            contents = full_prompt
+
         def _call() -> str:
             response = self._client.models.generate_content(
                 model=self._model_name,
-                contents=full_prompt,
+                contents=contents,
                 config=generation_config,
             )
             # Safety filters or empty responses can come back with no text.
@@ -92,20 +101,25 @@ class GeminiProvider(LLMProvider):
     async def decide_next_action(
         self,
         goal: str,
-        last_action: dict[str, Any] | None,
-        page_state: dict[str, Any],
+        memory: str | None,
+        recent_steps: list[dict[str, Any]] | None,
+        page_state: dict[str, Any] | None,
+        screenshot: bytes | None = None,
     ) -> dict[str, Any]:
-        user_prompt = (
-            f"Goal: {goal}\n"
-            f"Last action: {json.dumps(last_action)}\n"
-            f"Page state: {json.dumps(page_state)}\n"
-            f"Decide the next single action now."
-        )
+        user_prompt = "\n".join([
+            f"Goal: {goal}",
+            f"Memory: {memory or '(empty — first step)'}",
+            f"Recent steps: {json.dumps(recent_steps)}",
+            f"Page state: {json.dumps(page_state)}",
+            "Produce your AgentOutput now.",
+        ])
+
         response = await self._generate_json(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=user_prompt,
-            response_schema=_ACTION_RESPONSE_SCHEMA,
-            temperature=0.1,  # deterministic for step execution
+            response_schema=_AGENT_OUTPUT_SCHEMA,
+            temperature=0.1,
+            screenshot=screenshot,
         )
-        logger.debug("Decided next action: %s", response.get("type"))
+        logger.debug("Decided next action: %s", response.get("action", {}).get("type"))
         return response

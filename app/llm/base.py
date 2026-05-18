@@ -13,11 +13,9 @@ class LLMProvider(ABC):
     async def decide_next_action(
         self,
         goal: str,
-        last_action: dict[str, Any] | None,
+        memory: str,
+        recent_steps: list[dict[str, Any]],
         page_state: dict[str, Any],
+        screenshot: bytes | None,
     ) -> dict[str, Any]:
-        """Given the current page state, return the concrete next action.
-
-        Returns a single raw action dict.  The caller is responsible for
-        validation before execution.
-        """
+        """Return AgentOutput dict: evaluation, memory, next_goal, action."""

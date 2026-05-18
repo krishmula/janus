@@ -44,30 +44,51 @@ class MockBrowser(BrowserManager):
     async def get_page_state(self) -> dict[str, Any]:
         return dict(self._page_state)
 
+    async def get_screenshot_bytes(self) -> bytes | None:
+        return None
+
     async def stop(self):
         self.stopped = True
 
 
+def _wrap_action(action: dict[str, Any]) -> dict[str, Any]:
+    """Wrap a flat action dict into a minimal AgentOutput dict."""
+    return {
+        "evaluation": "step executed",
+        "memory": "task in progress",
+        "next_goal": "continue",
+        "action": action,
+    }
+
+
 class MockLLM(LLMProvider):
-    """LLMProvider that returns a fixed sequence of actions."""
+    """LLMProvider that returns a fixed sequence of AgentOutput dicts.
+
+    Accepts either full AgentOutput dicts or flat action dicts (auto-wrapped).
+    """
 
     def __init__(self, actions: list[dict[str, Any]] | None = None):
-        self.actions = actions or [{"type": "done", "result": "finished"}]
+        raw = actions or [{"type": "done", "result": "finished"}]
+        self.actions = [
+            a if "evaluation" in a else _wrap_action(a) for a in raw
+        ]
         self.call_count = 0
-        self.calls: list[tuple[str, dict[str, Any] | None, dict[str, Any]]] = []
+        self.calls: list[tuple[str, str, list, dict]] = []
 
     async def decide_next_action(
         self,
         goal: str,
-        last_action: dict[str, Any] | None,
+        memory: str,
+        recent_steps: list[dict[str, Any]],
         page_state: dict[str, Any],
+        screenshot: bytes | None = None,
     ) -> dict[str, Any]:
-        self.calls.append((goal, last_action, page_state))
+        self.calls.append((goal, memory, recent_steps, page_state))
         if self.call_count >= len(self.actions):
-            return {"type": "done", "result": "no more actions"}
-        action = self.actions[self.call_count]
+            return _wrap_action({"type": "done", "result": "no more actions"})
+        out = self.actions[self.call_count]
         self.call_count += 1
-        return action
+        return out
 
 
 @pytest.fixture
