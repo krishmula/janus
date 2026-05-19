@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.executor import run
+from app import trace
 from tests.conftest import MockBrowser, MockLLM
 
 
@@ -28,7 +29,7 @@ class TestLoopTermination:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=never_done_llm),
         ):
-            steps, final_result = await run("test", max_steps=3)
+            run_id, steps, final_result = await run("test", max_steps=3)
 
         assert len(steps) == 3
         assert final_result is None
@@ -40,7 +41,7 @@ class TestLoopTermination:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=never_done_llm),
         ):
-            steps, final_result = await run("test", max_steps=5)
+            run_id, steps, final_result = await run("test", max_steps=5)
 
         assert len(steps) == 5
         assert final_result is None
@@ -53,7 +54,7 @@ class TestLoopTermination:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, final_result = await run("test")
+            run_id, steps, final_result = await run("test")
 
         assert len(steps) == 0
         assert final_result is not None
@@ -112,7 +113,7 @@ class TestStepRecording:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, _ = await run("test")
+            run_id, steps, _ = await run("test")
 
         assert len(steps) == 1
         step = steps[0]
@@ -137,7 +138,7 @@ class TestStepRecording:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, _ = await run("test")
+            run_id, steps, _ = await run("test")
 
         action_types = [s["action_type"] for s in steps]
         assert "done" not in action_types
@@ -152,7 +153,7 @@ class TestFinalResult:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            _, final_result = await run("test")
+            run_id, _, final_result = await run("test")
 
         assert final_result is not None
         assert final_result["summary"] == "task completed"
@@ -166,7 +167,7 @@ class TestFinalResult:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            _, final_result = await run("test")
+            run_id, _, final_result = await run("test")
 
         assert final_result["url"] == "https://example.com/story"
         assert final_result["title"] == "The Story"
@@ -179,7 +180,7 @@ class TestFinalResult:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            _, final_result = await run("test")
+            run_id, _, final_result = await run("test")
 
         assert final_result["screenshot_path"] == "artifacts/screenshots/final.png"
 
@@ -190,7 +191,7 @@ class TestFinalResult:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=never_done_llm),
         ):
-            _, final_result = await run("test", max_steps=3)
+            run_id, _, final_result = await run("test", max_steps=3)
 
         assert final_result is None
 
@@ -358,3 +359,94 @@ class TestMemoryManagement:
 
         entry = llm.calls[1][2][0]
         assert entry["action_target"] == ".btn"
+
+
+class TestTraceIntegration:
+    @pytest.mark.asyncio
+    async def test_run_stored_in_db(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        trace.init_db(db_path)
+        browser = MockBrowser()
+        llm = MockLLM(actions=[{"type": "done", "result": "finished"}])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            run_id, steps, final_result = await run("find the top post")
+
+        stored = trace.get_run(run_id)
+        assert stored is not None
+        assert stored["goal"] == "find the top post"
+        assert stored["status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_steps_stored_in_db(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        trace.init_db(db_path)
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "done", "result": "done"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            run_id, steps, _ = await run("test")
+
+        stored_steps = trace.get_steps(run_id)
+        assert len(stored_steps) == 1
+        assert stored_steps[0]["action_type"] == "goto"
+        assert stored_steps[0]["action_target"] == "https://example.com"
+
+    @pytest.mark.asyncio
+    async def test_max_steps_status_stored(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        trace.init_db(db_path)
+        browser = MockBrowser()
+        llm = MockLLM(actions=[
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "goto", "url": "https://example.com"},
+            {"type": "goto", "url": "https://example.com"},
+        ])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            run_id, _, _ = await run("test", max_steps=3)
+
+        stored = trace.get_run(run_id)
+        assert stored["status"] == "max_steps"
+
+    @pytest.mark.asyncio
+    async def test_final_result_stored_on_done(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        trace.init_db(db_path)
+        browser = MockBrowser()
+        llm = MockLLM(actions=[{"type": "done", "result": "all done"}])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            run_id, _, final_result = await run("test")
+
+        stored = trace.get_run(run_id)
+        assert stored["final_result"] is not None
+        assert stored["final_screenshot_path"] is not None
+
+    @pytest.mark.asyncio
+    async def test_run_id_returned_from_run(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        trace.init_db(db_path)
+        browser = MockBrowser()
+        llm = MockLLM(actions=[{"type": "done", "result": "done"}])
+        with (
+            patch("app.executor.BrowserManager", return_value=browser),
+            patch("app.executor.get_llm_provider", return_value=llm),
+        ):
+            result = await run("test")
+
+        assert len(result) == 3
+        run_id = result[0]
+        assert isinstance(run_id, str)
+        assert len(run_id) > 0

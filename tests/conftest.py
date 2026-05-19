@@ -101,6 +101,16 @@ def mock_llm() -> MockLLM:
     return MockLLM()
 
 
+@pytest.fixture(autouse=True)
+def _tmp_trace_db(tmp_path):
+    """Point trace module at a temporary database for every test."""
+    from app import trace
+
+    db_path = str(tmp_path / "test.db")
+    trace.init_db(db_path)
+    yield
+
+
 @pytest.fixture
 def app_client() -> TestClient:
     from app.main import app
