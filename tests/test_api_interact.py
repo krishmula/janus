@@ -9,7 +9,7 @@ class TestInteractEndpoint:
     @pytest.mark.asyncio
     async def test_interact_returns_200(self, app_client):
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], None)
+            mock_run.return_value = ("id", [], None)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         assert response.status_code == 200
@@ -17,7 +17,7 @@ class TestInteractEndpoint:
     @pytest.mark.asyncio
     async def test_response_has_run_id(self, app_client):
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], None)
+            mock_run.return_value = ("id", [], None)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         data = response.json()
@@ -27,7 +27,7 @@ class TestInteractEndpoint:
     @pytest.mark.asyncio
     async def test_goal_preserved_in_response(self, app_client):
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], None)
+            mock_run.return_value = ("id", [], None)
             response = app_client.post(
                 "/api/interact", json={"prompt": "get the top post"}
             )
@@ -51,7 +51,7 @@ class TestInteractEndpoint:
             }
         ]
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = (fake_steps, None)
+            mock_run.return_value = ("id", fake_steps, None)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         data = response.json()
@@ -61,7 +61,7 @@ class TestInteractEndpoint:
     @pytest.mark.asyncio
     async def test_total_steps_matches_steps_length(self, app_client):
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], None)
+            mock_run.return_value = ("id", [], None)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         data = response.json()
@@ -76,7 +76,7 @@ class TestInteractEndpoint:
             "screenshot_path": "artifacts/screenshots/final.png",
         }
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], fake_result)
+            mock_run.return_value = ("id", [], fake_result)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         data = response.json()
@@ -91,7 +91,7 @@ class TestInteractEndpoint:
             "screenshot_path": "artifacts/screenshots/final.png",
         }
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], fake_result)
+            mock_run.return_value = ("id", [], fake_result)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         data = response.json()
@@ -100,7 +100,7 @@ class TestInteractEndpoint:
     @pytest.mark.asyncio
     async def test_final_screenshot_null_when_no_result(self, app_client):
         with patch("app.main.executor.run") as mock_run:
-            mock_run.return_value = ([], None)
+            mock_run.return_value = ("id", [], None)
             response = app_client.post("/api/interact", json={"prompt": "test"})
 
         data = response.json()

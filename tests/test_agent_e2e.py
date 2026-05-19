@@ -21,7 +21,7 @@ class TestGotoClickDone:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, final_result = await run("get the top post on hackernews")
+            run_id, steps, final_result = await run("get the top post on hackernews")
 
         assert len(steps) == 2
         assert steps[0]["action_type"] == "goto"
@@ -38,7 +38,7 @@ class TestDoneOnly:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, final_result = await run("do nothing")
+            run_id, steps, final_result = await run("do nothing")
 
         assert len(steps) == 0
         assert final_result["summary"] == "nothing to do"
@@ -60,7 +60,7 @@ class TestNeverDone:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, final_result = await run("test", max_steps=2)
+            run_id, steps, final_result = await run("test", max_steps=2)
 
         assert len(steps) == 2
         assert final_result is None
@@ -108,7 +108,7 @@ class TestScreenshotOnDone:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            _, final_result = await run("test")
+            run_id, _, final_result = await run("test")
 
         assert final_result["url"] == "https://x.com/post/123"
         assert final_result["title"] == "X Post"
@@ -129,7 +129,7 @@ class TestMultiStepSequence:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, final_result = await run("test")
+            run_id, steps, final_result = await run("test")
 
         assert len(steps) == 4
         assert [s["action_type"] for s in steps] == ["goto", "type", "press", "click"]
@@ -158,7 +158,7 @@ class TestMemoryEvolution:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, _ = await run("get the top post on hackernews")
+            run_id, steps, _ = await run("get the top post on hackernews")
 
         assert llm.calls[1][1] == "visited HN homepage"
         assert steps[0]["memory_snapshot"] == "visited HN homepage"
@@ -184,7 +184,7 @@ class TestMemoryEvolution:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, _ = await run("test")
+            run_id, steps, _ = await run("test")
 
         assert steps[0]["evaluation"] == "page loaded successfully"
 
@@ -209,6 +209,6 @@ class TestMemoryEvolution:
             patch("app.executor.BrowserManager", return_value=browser),
             patch("app.executor.get_llm_provider", return_value=llm),
         ):
-            steps, _ = await run("test")
+            run_id, steps, _ = await run("test")
 
         assert steps[0]["next_goal"] == "click the main link"

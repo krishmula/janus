@@ -54,8 +54,7 @@ def create_app() -> FastAPI:
     @application.post("/api/interact")
     async def interact(body: InteractRequest) -> JSONResponse:
         goal = body.prompt
-        run_id = str(uuid.uuid4())
-        steps, final_result = await executor.run(goal)
+        run_id, steps, final_result = await executor.run(goal)
 
         logger.debug("Interact completed with %d step(s)", len(steps))
 
