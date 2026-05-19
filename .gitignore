@@ -37,6 +37,9 @@ ENV/
 *.sqlite3
 
 # Artifacts
+artifacts/*.db
+artifacts/*.db-wal
+artifacts/*.db-shm
 artifacts/screenshots/*
 artifacts/traces/*
 !artifacts/screenshots/.gitkeep
@@ -60,8 +63,9 @@ logs/
 # Playwright
 .playwright/
 
-# Claude Code
+# Agent config
 .claude/
+.opencode/
 
 # Generated docs
 docs/html/

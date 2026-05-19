@@ -171,7 +171,9 @@ class BrowserManager:
             elif type_ == "click":
                 await self._page.click(action["target"])
             elif type_ == "type":
-                await self._page.triple_click(action["target"])
+                # await self._page.triple_click(action["target"])
+                for i in range(3):
+                    await self._page.click(action["target"])
                 await self._page.type(action["target"], action["text"], delay=80)
             elif type_ == "press":
                 await self._page.keyboard.press(action["key"])
